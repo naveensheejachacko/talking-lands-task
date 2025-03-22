@@ -1,0 +1,533 @@
+# main.py
+import uvicorn
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, func
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from geoalchemy2 import Geometry
+from pydantic import BaseModel
+from typing import List, Optional, Dict
+from datetime import datetime
+import json
+import os
+from shapely.geometry import shape
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Initialize FastAPI app
+app = FastAPI(title="Spatial Data Platform API")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Database connection
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:123@localhost:5432/talking_lands")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Database models
+class PointData(Base):
+    __tablename__ = "point_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Define a geometry column for points
+    geom = Column(Geometry("POINT", srid=4326))
+
+class PolygonData(Base):
+    __tablename__ = "polygon_data"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    description = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Define a geometry column for polygons
+    geom = Column(Geometry("POLYGON", srid=4326))
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Dependency to get database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Pydantic models for request and response
+class PointFeature(BaseModel):
+    type: str
+    geometry: Dict
+    properties: Dict
+
+class PointFeatureCollection(BaseModel):
+    type: str
+    features: List[PointFeature]
+
+class PolygonFeature(BaseModel):
+    type: str
+    geometry: Dict
+    properties: Dict
+
+class PolygonFeatureCollection(BaseModel):
+    type: str
+    features: List[PolygonFeature]
+
+class DataResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    geom: str
+
+# Routes for Point data
+@app.post("/api/points", response_model=Dict)
+def create_points(data: PointFeatureCollection, db: Session = Depends(get_db)):
+    """
+    Store multiple point data in GeoJSON format
+    """
+    if data.type != "FeatureCollection":
+        raise HTTPException(status_code=400, detail="Invalid GeoJSON format. Must be a FeatureCollection.")
+    
+    created_points = []
+    for feature in data.features:
+        if feature.type != "Feature" or feature.geometry["type"] != "Point":
+            raise HTTPException(status_code=400, detail="Invalid feature format. Must be Point type.")
+        
+        # Extract properties
+        name = feature.properties.get("name", "Unnamed Point")
+        description = feature.properties.get("description", "")
+        
+        # Extract coordinates
+        coords = feature.geometry["coordinates"]
+        wkt_point = f"POINT({coords[0]} {coords[1]})"
+        
+        # Create new point record
+        db_point = PointData(
+            name=name,
+            description=description,
+            geom=func.ST_GeomFromText(wkt_point, 4326)
+        )
+        
+        db.add(db_point)
+        db.flush()
+        created_points.append(db_point.id)
+    
+    db.commit()
+    return {"status": "success", "created_ids": created_points}
+
+@app.get("/api/points", response_model=PointFeatureCollection)
+def get_points(db: Session = Depends(get_db)):
+    """
+    Retrieve all point data as GeoJSON
+    """
+    points = db.query(PointData).all()
+    
+    features = []
+    for point in points:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(point.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": point.id,
+                "name": point.name,
+                "description": point.description,
+                "created_at": point.created_at.isoformat(),
+                "updated_at": point.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+@app.get("/api/points/{point_id}", response_model=PointFeature)
+def get_point(point_id: int, db: Session = Depends(get_db)):
+    """
+    Retrieve a specific point by ID
+    """
+    point = db.query(PointData).filter(PointData.id == point_id).first()
+    if not point:
+        raise HTTPException(status_code=404, detail="Point not found")
+    
+    # Convert geometry to GeoJSON
+    geom_json = db.scalar(func.ST_AsGeoJSON(point.geom))
+    geometry = json.loads(geom_json)
+    
+    # Create feature
+    feature = {
+        "type": "Feature",
+        "geometry": geometry,
+        "properties": {
+            "id": point.id,
+            "name": point.name,
+            "description": point.description,
+            "created_at": point.created_at.isoformat(),
+            "updated_at": point.updated_at.isoformat()
+        }
+    }
+    
+    return feature
+
+@app.put("/api/points/{point_id}", response_model=Dict)
+def update_point(point_id: int, feature: PointFeature, db: Session = Depends(get_db)):
+    """
+    Update an existing point
+    """
+    point = db.query(PointData).filter(PointData.id == point_id).first()
+    if not point:
+        raise HTTPException(status_code=404, detail="Point not found")
+    
+    if feature.type != "Feature" or feature.geometry["type"] != "Point":
+        raise HTTPException(status_code=400, detail="Invalid feature format. Must be Point type.")
+    
+    # Update properties
+    if "name" in feature.properties:
+        point.name = feature.properties["name"]
+    if "description" in feature.properties:
+        point.description = feature.properties["description"]
+    
+    # Update geometry
+    coords = feature.geometry["coordinates"]
+    wkt_point = f"POINT({coords[0]} {coords[1]})"
+    point.geom = func.ST_GeomFromText(wkt_point, 4326)
+    point.updated_at = datetime.utcnow()
+    
+    db.commit()
+    return {"status": "success", "updated_id": point_id}
+
+@app.delete("/api/points/{point_id}", response_model=Dict)
+def delete_point(point_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a point by ID
+    """
+    point = db.query(PointData).filter(PointData.id == point_id).first()
+    if not point:
+        raise HTTPException(status_code=404, detail="Point not found")
+    
+    db.delete(point)
+    db.commit()
+    
+    return {"status": "success", "deleted_id": point_id}
+
+# Routes for Polygon data
+@app.post("/api/polygons", response_model=Dict)
+def create_polygons(data: PolygonFeatureCollection, db: Session = Depends(get_db)):
+    """
+    Store multiple polygon data in GeoJSON format
+    """
+    if data.type != "FeatureCollection":
+        raise HTTPException(status_code=400, detail="Invalid GeoJSON format. Must be a FeatureCollection.")
+    
+    created_polygons = []
+    for feature in data.features:
+        if feature.type != "Feature" or feature.geometry["type"] != "Polygon":
+            raise HTTPException(status_code=400, detail="Invalid feature format. Must be Polygon type.")
+        
+        # Extract properties
+        name = feature.properties.get("name", "Unnamed Polygon")
+        description = feature.properties.get("description", "")
+        
+        # Create WKT representation of the polygon
+        polygon_shape = shape(feature.geometry)
+        wkt_polygon = polygon_shape.wkt
+        
+        # Create new polygon record
+        db_polygon = PolygonData(
+            name=name,
+            description=description,
+            geom=func.ST_GeomFromText(wkt_polygon, 4326)
+        )
+        
+        db.add(db_polygon)
+        db.flush()
+        created_polygons.append(db_polygon.id)
+    
+    db.commit()
+    return {"status": "success", "created_ids": created_polygons}
+
+@app.get("/api/polygons", response_model=PolygonFeatureCollection)
+def get_polygons(db: Session = Depends(get_db)):
+    """
+    Retrieve all polygon data as GeoJSON
+    """
+    polygons = db.query(PolygonData).all()
+    
+    features = []
+    for polygon in polygons:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(polygon.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": polygon.id,
+                "name": polygon.name,
+                "description": polygon.description,
+                "created_at": polygon.created_at.isoformat(),
+                "updated_at": polygon.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+@app.get("/api/polygons/{polygon_id}", response_model=PolygonFeature)
+def get_polygon(polygon_id: int, db: Session = Depends(get_db)):
+    """
+    Retrieve a specific polygon by ID
+    """
+    polygon = db.query(PolygonData).filter(PolygonData.id == polygon_id).first()
+    if not polygon:
+        raise HTTPException(status_code=404, detail="Polygon not found")
+    
+    # Convert geometry to GeoJSON
+    geom_json = db.scalar(func.ST_AsGeoJSON(polygon.geom))
+    geometry = json.loads(geom_json)
+    
+    # Create feature
+    feature = {
+        "type": "Feature",
+        "geometry": geometry,
+        "properties": {
+            "id": polygon.id,
+            "name": polygon.name,
+            "description": polygon.description,
+            "created_at": polygon.created_at.isoformat(),
+            "updated_at": polygon.updated_at.isoformat()
+        }
+    }
+    
+    return feature
+
+@app.put("/api/polygons/{polygon_id}", response_model=Dict)
+def update_polygon(polygon_id: int, feature: PolygonFeature, db: Session = Depends(get_db)):
+    """
+    Update an existing polygon
+    """
+    polygon = db.query(PolygonData).filter(PolygonData.id == polygon_id).first()
+    if not polygon:
+        raise HTTPException(status_code=404, detail="Polygon not found")
+    
+    if feature.type != "Feature" or feature.geometry["type"] != "Polygon":
+        raise HTTPException(status_code=400, detail="Invalid feature format. Must be Polygon type.")
+    
+    # Update properties
+    if "name" in feature.properties:
+        polygon.name = feature.properties["name"]
+    if "description" in feature.properties:
+        polygon.description = feature.properties["description"]
+    
+    # Update geometry
+    polygon_shape = shape(feature.geometry)
+    wkt_polygon = polygon_shape.wkt
+    polygon.geom = func.ST_GeomFromText(wkt_polygon, 4326)
+    polygon.updated_at = datetime.utcnow()
+    
+    db.commit()
+    return {"status": "success", "updated_id": polygon_id}
+
+@app.delete("/api/polygons/{polygon_id}", response_model=Dict)
+def delete_polygon(polygon_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a polygon by ID
+    """
+    polygon = db.query(PolygonData).filter(PolygonData.id == polygon_id).first()
+    if not polygon:
+        raise HTTPException(status_code=404, detail="Polygon not found")
+    
+    db.delete(polygon)
+    db.commit()
+    
+    return {"status": "success", "deleted_id": polygon_id}
+
+# Spatial Queries
+@app.get("/api/spatial/points-within-distance", response_model=PointFeatureCollection)
+def points_within_distance(lat: float, lon: float, distance: float, db: Session = Depends(get_db)):
+    """
+    Find all points within a specific distance (in meters) from a given point
+    """
+    point = f"POINT({lon} {lat})"
+    
+    # Create a query that filters points within the specified distance
+    # ST_DWithin uses the geography type to calculate distance in meters
+    query = db.query(PointData).filter(
+        func.ST_DWithin(
+            func.ST_Transform(PointData.geom, 4326),func.geography, 
+            func.ST_GeomFromText(point, 4326),func.geography, 
+            distance
+        )
+    )
+    
+    points = query.all()
+    
+    features = []
+    for point in points:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(point.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": point.id,
+                "name": point.name,
+                "description": point.description,
+                "created_at": point.created_at.isoformat(),
+                "updated_at": point.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+@app.get("/api/spatial/points-in-polygon/{polygon_id}", response_model=PointFeatureCollection)
+def points_in_polygon(polygon_id: int, db: Session = Depends(get_db)):
+    """
+    Find all points that fall within a specific polygon
+    """
+    polygon = db.query(PolygonData).filter(PolygonData.id == polygon_id).first()
+    if not polygon:
+        raise HTTPException(status_code=404, detail="Polygon not found")
+    
+    # Query points that are within the polygon
+    query = db.query(PointData).filter(
+        func.ST_Within(
+            PointData.geom,
+            polygon.geom
+        )
+    )
+    
+    points = query.all()
+    
+    features = []
+    for point in points:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(point.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": point.id,
+                "name": point.name,
+                "description": point.description,
+                "created_at": point.created_at.isoformat(),
+                "updated_at": point.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+@app.get("/api/spatial/polygons-containing-point", response_model=PolygonFeatureCollection)
+def polygons_containing_point(lat: float, lon: float, db: Session = Depends(get_db)):
+    """
+    Find all polygons that contain a specific point
+    """
+    point = f"POINT({lon} {lat})"
+    
+    # Query polygons that contain the point
+    query = db.query(PolygonData).filter(
+        func.ST_Contains(
+            PolygonData.geom,
+            func.ST_GeomFromText(point, 4326)
+        )
+    )
+    
+    polygons = query.all()
+    
+    features = []
+    for polygon in polygons:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(polygon.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": polygon.id,
+                "name": polygon.name,
+                "description": polygon.description,
+                "created_at": polygon.created_at.isoformat(),
+                "updated_at": polygon.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+@app.get("/api/spatial/overlapping-polygons/{polygon_id}", response_model=PolygonFeatureCollection)
+def overlapping_polygons(polygon_id: int, db: Session = Depends(get_db)):
+    """
+    Find all polygons that overlap with a specific polygon
+    """
+    polygon = db.query(PolygonData).filter(PolygonData.id == polygon_id).first()
+    if not polygon:
+        raise HTTPException(status_code=404, detail="Polygon not found")
+    
+    # Query polygons that overlap with the specified polygon
+    query = db.query(PolygonData).filter(
+        PolygonData.id != polygon_id,  # Exclude the source polygon
+        func.ST_Overlaps(
+            PolygonData.geom,
+            polygon.geom
+        )
+    )
+    
+    polygons = query.all()
+    
+    features = []
+    for polygon in polygons:
+        # Convert geometry to GeoJSON
+        geom_json = db.scalar(func.ST_AsGeoJSON(polygon.geom))
+        geometry = json.loads(geom_json)
+        
+        # Create feature
+        feature = {
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": polygon.id,
+                "name": polygon.name,
+                "description": polygon.description,
+                "created_at": polygon.created_at.isoformat(),
+                "updated_at": polygon.updated_at.isoformat()
+            }
+        }
+        features.append(feature)
+    
+    return {"type": "FeatureCollection", "features": features}
+
+# Run the application
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
