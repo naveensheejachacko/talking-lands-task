@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [72.8777, 19.0760]
+      },
+      "properties": {
+        "name": "Mumbai Point",
+        "description": "A point in Mumbai city"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5946, 12.9716]
+      },
+      "properties": {
+        "name": "Bangalore Point",
+        "description": "A point in Bangalore city"
+      }
+    }
+  ]
+}

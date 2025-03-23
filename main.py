@@ -13,6 +13,11 @@ import json
 import os
 from shapely.geometry import shape
 from dotenv import load_dotenv
+from app.models.spatial import PointData, PolygonData
+from app.database import SessionLocal, engine, Base, get_db
+from app.schemas.spatial import PointFeature, PointFeatureCollection, PolygonFeature,PolygonFeatureCollection
+# Create tables
+Base.metadata.create_all(bind=engine)
 
 # Load environment variables
 load_dotenv()
@@ -29,38 +34,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Database connection
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:123@localhost:5432/talking_lands")
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# Database models
-class PointData(Base):
-    __tablename__ = "point_data"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    # Define a geometry column for points
-    geom = Column(Geometry("POINT", srid=4326))
-
-class PolygonData(Base):
-    __tablename__ = "polygon_data"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    description = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    # Define a geometry column for polygons
-    geom = Column(Geometry("POLYGON", srid=4326))
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
 # Dependency to get database session
 def get_db():
     db = SessionLocal()
@@ -68,33 +41,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-# Pydantic models for request and response
-class PointFeature(BaseModel):
-    type: str
-    geometry: Dict
-    properties: Dict
-
-class PointFeatureCollection(BaseModel):
-    type: str
-    features: List[PointFeature]
-
-class PolygonFeature(BaseModel):
-    type: str
-    geometry: Dict
-    properties: Dict
-
-class PolygonFeatureCollection(BaseModel):
-    type: str
-    features: List[PolygonFeature]
-
-class DataResponse(BaseModel):
-    id: int
-    name: str
-    description: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    geom: str
 
 # Routes for Point data
 @app.post("/api/points", response_model=Dict)

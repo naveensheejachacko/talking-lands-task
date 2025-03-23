@@ -1,0 +1,34 @@
+// create data
+
+
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5946, 12.9716]
+      },
+      "properties": {
+        "name": "Tech Park",
+        "description": "Software Technology Park"
+      }
+    }
+  ]
+}
+
+
+// Update data
+
+{
+  "type": "Feature",
+  "geometry": {
+    "type": "Point",
+    "coordinates": [77.5946, 12.9716]
+  },
+  "properties": {
+    "name": "Tech Park",
+    "description": "Software Technology Park"
+  }
+}

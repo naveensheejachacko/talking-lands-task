@@ -1,0 +1,21 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [77.5946, 12.9716],
+          [77.5947, 12.9717],
+          [77.5948, 12.9716],
+          [77.5946, 12.9716]
+        ]]
+      },
+      "properties": {
+        "name": "Campus Area",
+        "description": "University Campus Boundary"
+      }
+    }
+  ]
+}
