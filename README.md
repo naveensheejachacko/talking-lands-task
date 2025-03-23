@@ -156,3 +156,6 @@ python examples/test_spatial.py
 - All coordinates are in [longitude, latitude] format
 - Distances are in meters
 - Using WGS84 (EPSG:4326) coordinate system
+
+
+![image](https://github.com/user-attachments/assets/a44a6f4d-d29c-4712-b5b9-34ab471e163f)
