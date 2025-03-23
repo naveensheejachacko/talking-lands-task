@@ -6,24 +6,17 @@
       "geometry": {
         "type": "Polygon",
         "coordinates": [[
-          [77.5946, 12.9716],
-          [77.5947, 12.9717],
-          [77.5948, 12.9716],
-          [77.5946, 12.9716]
+          [77.5945, 12.9715],
+          [77.5948, 12.9715],
+          [77.5948, 12.9718],
+          [77.5945, 12.9718],
+          [77.5945, 12.9715]
         ]]
       },
       "properties": {
         "name": "Campus Area",
-        "description": "University Campus Boundary"
+        "description": "University Campus"
       }
     }
   ]
-}
-
-
-// polygon containg points
-
-{
-  "lat":12.9716,
-  "lon":77.5946
 }

@@ -1,0 +1,27 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5946, 12.9716]
+      },
+      "properties": {
+        "name": "Tech Park",
+        "description": "Software Technology Park"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5947, 12.9717]
+      },
+      "properties": {
+        "name": "Coffee Shop",
+        "description": "Local Coffee Shop"
+      }
+    }
+  ]
+}
