@@ -8,11 +8,22 @@
       "type": "Feature",
       "geometry": {
         "type": "Point",
+        "coordinates": [72.8777, 19.0760]
+      },
+      "properties": {
+        "name": "Mumbai Point",
+        "description": "A point in Mumbai city"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
         "coordinates": [77.5946, 12.9716]
       },
       "properties": {
-        "name": "Tech Park",
-        "description": "Software Technology Park"
+        "name": "Bangalore Point",
+        "description": "A point in Bangalore city"
       }
     }
   ]
@@ -32,3 +43,12 @@
     "description": "Software Technology Park"
   }
 }
+
+
+// points within distance
+{
+  "lat":12.9716,
+  "lon":77.5946,
+  "distance": 1000
+}
+

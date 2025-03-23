@@ -2,7 +2,7 @@
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, func
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, func, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from geoalchemy2 import Geometry
@@ -316,27 +316,24 @@ def points_within_distance(lat: float, lon: float, distance: float, db: Session 
     """
     Find all points within a specific distance (in meters) from a given point
     """
-    point = f"POINT({lon} {lat})"
-    
-    # Create a query that filters points within the specified distance
-    # ST_DWithin uses the geography type to calculate distance in meters
+    # Use text() for raw SQL to ensure proper PostGIS syntax
     query = db.query(PointData).filter(
-        func.ST_DWithin(
-            func.ST_Transform(PointData.geom, 4326),func.geography, 
-            func.ST_GeomFromText(point, 4326),func.geography, 
-            distance
-        )
-    )
+        text("""
+            ST_DWithin(
+                geom::geography,
+                ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+                :distance
+            )
+        """)
+    ).params(lon=lon, lat=lat, distance=distance)
     
     points = query.all()
     
     features = []
     for point in points:
-        # Convert geometry to GeoJSON
         geom_json = db.scalar(func.ST_AsGeoJSON(point.geom))
         geometry = json.loads(geom_json)
         
-        # Create feature
         feature = {
             "type": "Feature",
             "geometry": geometry,
@@ -398,25 +395,24 @@ def polygons_containing_point(lat: float, lon: float, db: Session = Depends(get_
     """
     Find all polygons that contain a specific point
     """
-    point = f"POINT({lon} {lat})"
-    
-    # Query polygons that contain the point
+    # Use ST_DWithin with a small buffer to handle precision issues
     query = db.query(PolygonData).filter(
-        func.ST_Contains(
-            PolygonData.geom,
-            func.ST_GeomFromText(point, 4326)
-        )
-    )
+        text("""
+            ST_DWithin(
+                geom::geography,
+                ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+                1.0  -- 1 meter buffer
+            )
+        """)
+    ).params(lon=lon, lat=lat)
     
     polygons = query.all()
     
     features = []
     for polygon in polygons:
-        # Convert geometry to GeoJSON
         geom_json = db.scalar(func.ST_AsGeoJSON(polygon.geom))
         geometry = json.loads(geom_json)
         
-        # Create feature
         feature = {
             "type": "Feature",
             "geometry": geometry,
@@ -444,12 +440,14 @@ def overlapping_polygons(polygon_id: int, db: Session = Depends(get_db)):
     # Query polygons that overlap with the specified polygon
     query = db.query(PolygonData).filter(
         PolygonData.id != polygon_id,  # Exclude the source polygon
-        func.ST_Overlaps(
-            PolygonData.geom,
-            polygon.geom
-        )
-    )
-    
+        text("""
+            ST_Intersects(
+                geom,
+                ST_SetSRID(ST_GeomFromText(:wkt), 4326)
+            )
+        """)
+    ).params(wkt=db.scalar(func.ST_AsText(polygon.geom)))
+
     polygons = query.all()
     
     features = []
