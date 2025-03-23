@@ -112,7 +112,7 @@ GET /api/spatial/points-within-distance?lat=12.9716&lon=77.5946&distance=1000
 
 ## Example Data Files
 
-The `/examples` directory contains sample data for testing:
+The `/tests` directory contains sample data for testing:
 
 1. `demo-points.json` - Sample point data
 2. `demo-polygon.json` - Sample polygon data
@@ -127,7 +127,7 @@ uvicorn main:app --reload
 
 2. Run the test script:
 ```bash
-python examples/test_spatial.py
+python tests/test_spatial.py
 ```
 
 ## API Reference
